@@ -1,0 +1,1 @@
+Design model for training session in UP/Ateneo Philipines. It features basic agent evacuation ability, catastroph management with alert level message sending to agent and evacuation strategies
