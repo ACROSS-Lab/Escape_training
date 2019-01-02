@@ -11,9 +11,13 @@ global {
 	
 	// PARAMETERS
 	float hazard_probability;
+	float hazard_max_size <- 200#m;
+	
 	pair indiv_threshold_gauss;
-	int nb_exit;
 	int nb_of_people;
+	
+	bool road_impact <- false;
+	int nb_exit;
 	
 	graph<geometry, geometry> road_network;
 	map<road,float> road_weights <- [];
@@ -89,11 +93,6 @@ global {
 			}
 		}
 		
-		/*
-		 * START OF INIT SECTION FOR TRAINING VERSION
-		 */
-		
-		
 		// Create network of road
 		lines <- clean_network(lines,0.0,true,true);
 		loop l over:lines{
@@ -105,7 +104,6 @@ global {
 		
 		road_network <- as_edge_graph(road);
 		road_weights <- road as_map (each::each.shape.perimeter);
-		//save road_network to:"../includes/grid_network.shp" type:csv;
 		
 		/*
 		 *  Evacuation point
@@ -145,6 +143,13 @@ global {
 		create hazard with:[proba_occur::hazard_probability];
 		create crisis_manager with:[predicated::rnd(1.0)];
 		
+		/*
+		 * Export world section
+		 */
+		save road to:"../includes/grid_network.shp" type:shp;
+		save building to:"../includes/buildings.shp" type:shp;
+		save evacuation_point to:"../includes/evac_points.shp" type:shp;
+		
 	}
 	
 	reflex update_indicators {
@@ -165,8 +170,7 @@ species crisis_manager {
 	
 	float predicated;
 	
-	float last_alert <- 0.0;
-	float alert_range <- 5#mn;
+	alert_strategy strategy;
 	
 	/*
 	 * Send alert when: hazard is confirmed (any intensity exept none) or randomly according to prediction
@@ -175,20 +179,59 @@ species crisis_manager {
 	 * 
 	 */
 	reflex send_alert when: hazard count (each.intensity > 0.0) > 0 or
-		flip(predicated * mean(hazard collect each.proba_occur)) {
+		flip(predicated * mean(hazard collect each.proba_occur)) and strategy.alert_conditional {
 			
 		float hazard_level <- sum(hazard collect (each.intensity)) / length(hazard);
 		float alert_level <- hazard_level = 0.0 ? predicated : predicated*hazard_level;
-		
-		if(last_alert = 0.0 or (time - last_alert = alert_range)){
-		
-			last_alert <- time;
-			write "ALERT at "+last_alert+" | level = "+int(alert_level*100);
-		
-			ask inhabitant { do receive_alert(alert_level);}
+	
+		list<inhabitant> target <- list<inhabitant>(strategy.alert_target);
+		ask target { do receive_alert(alert_level);}
+	}
+	
+	/*
+	 * Send staged alerts x times to n/x individuals each step (n being the number of inhabitant)
+	 */
+	action send_alert_shuffle(float alert_level, int stages){
+		list<inhabitant> alert_list <- list(inhabitant);
+		int stage_number <- int(length(inhabitant) / stages);
+		loop times:stages-1{
+			list<inhabitant> stage_alert_list <- stage_number among alert_list;
+			ask stage_alert_list { do receive_alert(alert_level);}
+			alert_list >>- stage_alert_list;
 		}
 	}
 	
+	/*
+	 * Send alert to the individual at distance_buffer from the hazard location
+	 * and expend the alert zone of distance_buffer each time
+	 * 
+	 */
+	action send_alert_proximity(float alert_level, float distance_buffer){
+		list<inhabitant> alert_list <- list(inhabitant);
+		int iter <- 1;
+		loop while: not(empty(alert_list)){
+			list<inhabitant> stage_alert_list <- alert_list where (each.location distance_to hazard[0] < distance_buffer * iter);
+			ask stage_alert_list { do receive_alert(alert_level);}
+			alert_list >>- stage_alert_list;
+			iter <- iter + 1;  
+		}
+	}
+	
+}
+
+species alert_strategy {
+	
+	date last_alert;
+	
+	float alert_range <- 5#mn;
+	
+	bool alert_conditional {
+		return last_alert = nil or (current_date - last_alert = alert_range);
+	}
+	
+	list<inhabitant> alert_target {
+		return list(inhabitant);
+	}
 }
 
 species inhabitant skills:[moving] {
@@ -271,7 +314,7 @@ species hazard {
 	}
 	
 	aspect default {
-		draw sphere(200#m*intensity) at: {location.x,location.y,-200#m*intensity} color:#red;
+		draw sphere(hazard_max_size*intensity) at: {location.x,location.y,-hazard_max_size*intensity} color:#red;
 	}
 	
 }
@@ -300,6 +343,14 @@ species road {
 	float capacity;
 	
 	float display_size;
+	
+	reflex disrupt when: road_impact and not(empty(hazard)) {
+		loop h over:hazard {
+			if(self distance_to h < h.intensity*hazard_max_size){
+				do die;
+			}
+		}
+	}
 	
 	reflex update_weights {
 		road_weights[self] <- shape.perimeter * exp(-users/capacity);
