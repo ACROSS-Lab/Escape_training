@@ -14,12 +14,19 @@ global {
 	file evac_points <- file("../includes/evac_points.shp");
 	geometry shape <- envelope(road_file);
 	
-		// PARAMETERS
+	graph<geometry, geometry> road_network;
+	
+	// ---------- //
+	// PARAMETERS //
+	// ---------- //
+	
+	// HAZARD
 	float hazard_probability;
+	bool disrupt_road;
+	
+	// PEOPLE
 	pair indiv_threshold_gauss;
 	int nb_of_people;
-	
-	graph<geometry, geometry> road_network;
 	
 	/*
 	 * USER TRIGGERED DISASTER
@@ -36,19 +43,32 @@ global {
 		create building from:buildings;
 		create evacuation_point from:evac_points;
 		
+		create inhabitant number:nb_of_people with:[location::any_location_in(one_of(building))];
+		
 		road_network <- as_edge_graph(road);
 	
+	}
+	
+	reflex when:empty(inhabitant){
+		do pause;
 	}
 	
 }
 
 species inhabitant skills:[moving] {
 	
-	bool is_hazard;
-	evacuation_point safety_point;
+	bool is_hazard <- false update:not(empty(hazard));
+	evacuation_point safety_point <- evacuation_point with_min_of (each distance_to self);
 	
 	reflex evacuate when:is_hazard {
 		do goto target:safety_point on:road_network;
+		if(self distance_to safety_point < 1#m){
+			ask safety_point {do evacue_inhabitant(myself);}
+		}
+	}
+	
+	aspect default {
+		draw circle(1#m) color:is_hazard ? #red : #blue;
 	}
 	
 }
@@ -69,7 +89,7 @@ species hazard {
 
 species road {
 	
-	reflex disrupt when:not(empty(hazard)) {
+	reflex disrupt when: disrupt_road and not(empty(hazard)) {
 		loop h over:hazard {
 			if(self distance_to h < h.size){
 				do die;
@@ -94,12 +114,14 @@ species evacuation_point {
 	}
 	
 	aspect default {
-		draw circle(1+count_exit) color:#green;
+		draw circle(1#m+9#m*count_exit/nb_of_people) color:#green;
 	}
 	
 }
 
 experiment my_experiment {
+	parameter "Number of people" var: nb_of_people min: 100 init:5000;
+	parameter "Hazard disrupt road" var:disrupt_road init:false;
 	output {
 		display my_display type:opengl { 
 			species inhabitant;
