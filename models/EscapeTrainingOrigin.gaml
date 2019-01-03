@@ -172,6 +172,15 @@ species crisis_manager {
 	
 	alert_strategy strategy;
 	
+	init {
+		
+		if(strategy = nil){
+			create alert_strategy returns:default_alert;
+			strategy <- default_alert[0];
+		}
+		
+	}
+	
 	/*
 	 * Send alert when: hazard is confirmed (any intensity exept none) or randomly according to prediction
 	 * 
@@ -186,19 +195,6 @@ species crisis_manager {
 	
 		list<inhabitant> target <- list<inhabitant>(strategy.alert_target);
 		ask target { do receive_alert(alert_level);}
-	}
-	
-	/*
-	 * Send staged alerts x times to n/x individuals each step (n being the number of inhabitant)
-	 */
-	action send_alert_shuffle(float alert_level, int stages){
-		list<inhabitant> alert_list <- list(inhabitant);
-		int stage_number <- int(length(inhabitant) / stages);
-		loop times:stages-1{
-			list<inhabitant> stage_alert_list <- stage_number among alert_list;
-			ask stage_alert_list { do receive_alert(alert_level);}
-			alert_list >>- stage_alert_list;
-		}
 	}
 	
 	/*
@@ -219,6 +215,10 @@ species crisis_manager {
 	
 }
 
+// -------------- //
+//   STRATEGIES   //
+// -------------- //
+
 species alert_strategy {
 	
 	date last_alert;
@@ -229,11 +229,48 @@ species alert_strategy {
 		return last_alert = nil or (current_date - last_alert = alert_range);
 	}
 	
-	list<inhabitant> alert_target {
-		return list(inhabitant);
+	container<inhabitant> alert_target {
+		return inhabitant;
 	}
+	
 }
 
+species staged_strategy parent:alert_strategy {
+	
+	int nb_stage <- 4;
+	list<list<inhabitant>> staged_target;
+	
+	init {
+		loop times:nb_stage {
+			list<inhabitant> buffer <- list(inhabitant);
+			int nb_per_stage <- int(length(buffer) / nb_stage);
+			staged_target <+ nb_per_stage among buffer;
+		}
+	}
+	
+	container<inhabitant> alert_target {
+		container<inhabitant> targets <- staged_target[0];
+		staged_target >- targets;
+		return targets;
+	}
+	
+}
+
+species spatia_strategy parent:alert_strategy {
+	
+	float distance_buffer <- 100#m;
+	int iter <- 0;
+	
+	container<inhabitant> alert_target {
+		iter <- iter + 1;
+		return inhabitant where (each.location distance_to hazard[0] < distance_buffer * iter);
+	}
+	
+}
+
+/*
+ * Main agent represent 
+ */
 species inhabitant skills:[moving] {
 	
 	rgb color <- rnd_color(255);
