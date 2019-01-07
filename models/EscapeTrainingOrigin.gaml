@@ -19,6 +19,9 @@ global {
 	bool road_impact <- false;
 	int nb_exit;
 	
+	string the_alert_strategy;
+	list<string> the_strategies <- list("DEFAULT","STAGED","SPATIAL");
+	
 	graph<geometry, geometry> road_network;
 	map<road,float> road_weights <- [];
 	
@@ -37,8 +40,11 @@ global {
 	/*
 	 * OUTPUT SECTION
 	 */
-	int safe_inhabitant <- 0; // NOT WORKING ? update: sum(evacuation_point collect each.count_exit);
-	int evacuating_inhabitant <- 0; // NOT WORKING ... update: inhabitant count each.alerted;
+	int safe_inhabitant <- 0; // Number of people that reach an evacuation point
+	int evacuating_inhabitant <- 0;  // Number of people that want to reach an evacuation point
+	
+	float evacuation_time <- 0.0#sec; // Time elapse until the first alert has been sent
+	bool evacuation <-false;
 	
 	/*
 	 * USER TRIGGERED DISASTER
@@ -155,6 +161,7 @@ global {
 	reflex update_indicators {
 		safe_inhabitant <- sum(evacuation_point collect each.count_exit);
 		evacuating_inhabitant <- inhabitant count each.alerted;
+		evacuation_time <- evacuation ? evacuation_time + step : evacuation_time;
 	}
 	
 	reflex stop_simu when:empty(inhabitant) {
@@ -162,6 +169,8 @@ global {
 	}
 	
 }
+
+// -------------------- END OF INIT ---------------------- //
 
 /*
  * Main agent to be manipulated: entity that will decide which evacuation strategy to used
@@ -174,9 +183,19 @@ species crisis_manager {
 	
 	init {
 		
-		if(strategy = nil){
-			create alert_strategy returns:default_alert;
-			strategy <- default_alert[0];
+		switch the_alert_strategy {
+			match "DEFAULT" {
+				create alert_strategy returns:strategies; 
+				strategy <- strategies[0];
+			}
+			match "STAGED" {
+				create staged_strategy returns:strategies; 
+				strategy <- strategies[0];
+			}
+			match "SPATIAL" {
+				create spatial_strategy returns:strategies; 
+				strategy <- strategies[0];
+			}
 		}
 		
 	}
@@ -187,30 +206,17 @@ species crisis_manager {
 	 * Sended alert is a level from 0 to 1 according to hazard intensity
 	 * 
 	 */
-	reflex send_alert when: hazard count (each.intensity > 0.0) > 0 or
-		flip(predicated * mean(hazard collect each.proba_occur)) and strategy.alert_conditional {
+	reflex send_alert when: (hazard count (each.intensity > 0.0) > 0 or
+		flip(predicated * mean(hazard collect each.proba_occur))) and strategy.alert_conditional() {
 			
 		float hazard_level <- sum(hazard collect (each.intensity)) / length(hazard);
 		float alert_level <- hazard_level = 0.0 ? predicated : predicated*hazard_level;
-	
-		list<inhabitant> target <- list<inhabitant>(strategy.alert_target);
-		ask target { do receive_alert(alert_level);}
-	}
-	
-	/*
-	 * Send alert to the individual at distance_buffer from the hazard location
-	 * and expend the alert zone of distance_buffer each time
-	 * 
-	 */
-	action send_alert_proximity(float alert_level, float distance_buffer){
-		list<inhabitant> alert_list <- list(inhabitant);
-		int iter <- 1;
-		loop while: not(empty(alert_list)){
-			list<inhabitant> stage_alert_list <- alert_list where (each.location distance_to hazard[0] < distance_buffer * iter);
-			ask stage_alert_list { do receive_alert(alert_level);}
-			alert_list >>- stage_alert_list;
-			iter <- iter + 1;  
-		}
+		
+		ask strategy.alert_target() { do receive_alert(alert_level); }
+		
+		world.evacuation <- true;
+		write "ALERT SENT AT "+current_date.hour+":"+current_date.minute+":"+current_date.second
+			+"\nSTRATEGY: "+string(strategy);
 	}
 	
 }
@@ -223,14 +229,17 @@ species alert_strategy {
 	
 	date last_alert;
 	
-	float alert_range <- 5#mn;
-	
 	bool alert_conditional {
-		return last_alert = nil or (current_date - last_alert = alert_range);
+		if(last_alert = nil){
+			last_alert <- current_date;
+			return true;
+		} else {
+			return false;
+		}
 	}
 	
-	container<inhabitant> alert_target {
-		return inhabitant;
+	list<inhabitant> alert_target {
+		return list(inhabitant);
 	}
 	
 }
@@ -240,15 +249,26 @@ species staged_strategy parent:alert_strategy {
 	int nb_stage <- 4;
 	list<list<inhabitant>> staged_target;
 	
+	date last_alert;
+	float alert_range <- 5#mn;
+	
 	init {
-		loop times:nb_stage {
-			list<inhabitant> buffer <- list(inhabitant);
-			int nb_per_stage <- int(length(buffer) / nb_stage);
-			staged_target <+ nb_per_stage among buffer;
+		list<inhabitant> buffer <- list(inhabitant);
+		int nb_per_stage <- int(length(buffer) / nb_stage);
+		loop times:nb_stage-1 {
+			list<inhabitant> this_stage <- nb_per_stage among buffer;
+			buffer >>- this_stage; 
+			staged_target <+ this_stage;
 		}
+		staged_target <+ buffer;
 	}
 	
-	container<inhabitant> alert_target {
+	bool alert_conditional {
+		return not(empty(staged_target)) and 
+			(last_alert = nil or (current_date - last_alert = alert_range));
+	}
+	
+	list<inhabitant> alert_target {
 		container<inhabitant> targets <- staged_target[0];
 		staged_target >- targets;
 		return targets;
@@ -256,21 +276,33 @@ species staged_strategy parent:alert_strategy {
 	
 }
 
-species spatia_strategy parent:alert_strategy {
+species spatial_strategy parent:alert_strategy {
 	
+	geometry d_buffer;
 	float distance_buffer <- 100#m;
-	int iter <- 0;
+	int buffered_inhabitants;
+	float buffer_tolerance <- 0.1;
 	
-	container<inhabitant> alert_target {
+	int iter <- 1;
+	
+	bool alert_conditional {
+		return length(inhabitant overlapping d_buffer) < (buffered_inhabitants * buffer_tolerance) or iter = 1;
+	}
+	
+	list<inhabitant> alert_target {
+		d_buffer <- hazard[0] buffer (distance_buffer * iter);
+		list<inhabitant> trgt <- inhabitant overlapping d_buffer;
+		buffered_inhabitants <- length(trgt); 
 		iter <- iter + 1;
-		return inhabitant where (each.location distance_to hazard[0] < distance_buffer * iter);
+		return trgt;
 	}
 	
 }
 
-/*
- * Main agent represent 
- */
+// -------------- //
+//   INHABITANT   //
+// -------------- //
+
 species inhabitant skills:[moving] {
 	
 	rgb color <- rnd_color(255);
@@ -326,12 +358,17 @@ species inhabitant skills:[moving] {
 	
 }
 
+// ------------------ //
+//   HAZARD RELATED   //
+// ------------------ //
 
 species hazard {
 	
 	float proba_occur;
 	
 	float intensity;
+	
+	bool evolve <- false;
 	
 	/*
 	 * Trigger the hazard with random intensity
@@ -346,7 +383,7 @@ species hazard {
 	/*
 	 * Intensity decrease
 	 */
-	reflex evolve when: intensity > 0.0 {
+	reflex evolve when: evolve and intensity > 0.0 {
 		intensity <- intensity <= 0.01 ? 0.0 : intensity * 0.99;
 	}
 	
@@ -373,6 +410,10 @@ species evacuation_point {
 	}
 	
 }
+
+// ---------------- //
+//   ENVIRONEMENT   //
+// ---------------- //
 
 species road {
 
@@ -422,6 +463,7 @@ experiment my_experiment type:gui {
 	parameter "Number of exit" var:nb_exit min:1 init:4;
 	parameter "Hazard probability" var:hazard_probability init:0.01;
 	parameter "Average evacuation individual threshold" var:indiv_threshold_gauss type:pair init:0.0::0.0;
+	parameter "Alert Strategy" var:the_alert_strategy init:"Default" among:the_strategies;
 	output{
 		display my_display type:opengl { 
 			species inhabitant;
@@ -433,5 +475,6 @@ experiment my_experiment type:gui {
 		
 		monitor safe_inhabitant value:safe_inhabitant;
 		monitor number_of_evacuates value:evacuating_inhabitant;
+		monitor evacuation_time value:evacuation_time	;
 	}
 }
