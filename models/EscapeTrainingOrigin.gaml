@@ -10,30 +10,23 @@ model EscapeTraining1
 global {
 	
 	// PARAMETERS
-	float hazard_probability;
-	float hazard_max_size <- 200#m;
+	float time_before_hazard;
+	float hazard_uncertainty;
 	
 	pair indiv_threshold_gauss;
 	int nb_of_people;
 	
 	bool road_impact <- false;
-	int nb_exit;
 	
 	string the_alert_strategy;
-	list<string> the_strategies <- list("DEFAULT","STAGED","SPATIAL");
+	list<string> the_strategies <- list(string(default_strategy),string(staged_strategy),string(spatial_strategy));
 	
 	graph<geometry, geometry> road_network;
 	map<road,float> road_weights <- [];
 	
-	// BUILDING RELATED USELESS ATTRIBUTE
-	pair floor_range <- 2.4#m::3.4#m;
-	pair activity_range <- 2#h::6#h;
-	int max_floor <- 10;
-	
-	// Number of road sections
-	int nb_xy_intersect <- 10;
-	
-	geometry shape <- square(500#m);
+	file the_sea <- file("../includes/sea_environment.shp");
+	file the_ground <- file("../includes/ground_environment.shp");
+	geometry shape <- envelope(the_sea+the_ground);
 	
 	float step <- 2#sec;
 	
@@ -43,99 +36,38 @@ global {
 	int safe_inhabitant <- 0; // Number of people that reach an evacuation point
 	int evacuating_inhabitant <- 0;  // Number of people that want to reach an evacuation point
 	
+	int casualties <- 0; // Number of people that dies from hazard
+	
 	float evacuation_time <- 0.0#sec; // Time elapse until the first alert has been sent
 	bool evacuation <-false;
 	
 	/*
 	 * USER TRIGGERED DISASTER
-	 */
+	 *
 	user_command disaster action: create_disaster;
 	action create_disaster {
 		point disasterPoint <- #user_location;
-		create hazard with: [location::disasterPoint,proba_occur::1.0];
+		create hazard with: [location::disasterPoint,warning_level::100];
 	}
+	* 
+	*/
 	
 	init {
 		
-		/*
-		 * CREATION OF THE WORLD : TO BE SAVED TO FILES AND DELETED FOR THE TRAINING VERSION
-		 */
+		create water from:file("../includes/sea_environment.shp");
+		create ground from:file("../includes/ground_environment.shp");
 		
-		float x_width <- shape.width / nb_xy_intersect;
-		float y_height <- shape.height / nb_xy_intersect;
-		float corridors <- (x_width < y_height ? x_width : y_height) / 10;
-		list<geometry> lines <- [];
-	
-		
-		// N/S or S/N roads
-		loop x from:1 to:nb_xy_intersect-1 {
-			lines <+ flip(0.5) ? 
-				line({x*x_width,0}, {x*x_width,world.shape.height}) : 
-				line({x*x_width,world.shape.height}, {x*x_width,0});
-		}
-		// O/E or E/O roads
-		loop y from:1 to:nb_xy_intersect-1 {
-			lines <+ flip(0.5) ?
-				line({0,y*y_height}, {world.shape.width,y*y_height}) :
-				line({world.shape.width,y*y_height}, {0,y*y_height});
-		}
-		
-		// Buildings
-		int total_capacity <- 0;
-		loop i_x from:0 to:nb_xy_intersect-1 {
-			loop i_y from:0 to:nb_xy_intersect-1 {
-				create building {
-					point x_point <- {i_x*x_width+corridors, i_y*y_height+corridors};
-					float x_length <- x_width-2*corridors;
-					float y_length <- y_height-2*corridors;
-					shape <- polygon(x_point, x_point+{x_length,0}, 
-						x_point+{x_length,y_length}, x_point+{0,y_length}); 	
-					
-					int nb_of_floor <- rnd(1,max_floor);
-					building_height <- nb_of_floor * rnd(floor_range.key,floor_range.value)#m;
-					max_capacity <- int(nb_of_floor * shape.area / (10#m^2));
-					total_capacity <- total_capacity + max_capacity;
-				}
-			}
-		}
-		
-		// Create network of road
-		lines <- clean_network(lines,0.0,true,true);
-		loop l over:lines{
-			create road {
-				shape <- l;
-				capacity <- l.perimeter;
-			}
-		}		
+		create road from:file("../includes/road_environment.shp");
+		create building from:file("../includes/building_environment.shp");
+		write "Building average height: "+mean(building collect each.height);
+		create evacuation_point from:file("../includes/evacuation_environment.shp");
 		
 		road_network <- as_edge_graph(road);
 		road_weights <- road as_map (each::each.shape.perimeter);
 		
-		/*
-		 *  Evacuation point
-		 *  TODO: move to shapefile with the rest
-		 */
-		loop while: nb_exit > 0 {
-			int position <- rnd(1,nb_xy_intersect-1);
-			point the_exit;
-			if(flip(0.5)){
-				the_exit <- {position*x_width,flip(0.5) ? 0 : world.shape.height};
-			} else {
-				the_exit <- {flip(0.5) ? 0 : world.shape.width, position*y_height};
-			}
-			
-			bool no_duplicate <- empty(evacuation_point where (each.location = the_exit));
-			bool valide_exit <- not(empty(road where (each.shape.points[1] = the_exit))); 
-			
-			if (no_duplicate and valide_exit){
-				create evacuation_point with:[location::the_exit];
-				nb_exit <- nb_exit - 1;
-			}
-		}
-		
 		create inhabitant number:nb_of_people{
 			
-			list<building> available_places <- building where not(each.max_capacity - length(each.occupants) = 0);
+			list<building> available_places <- building where not(each.capacity - length(each.occupants) = 0);
 			bool in_building <- length(available_places) = 0 ? false : true;  
 			if(in_building){
 				current_place <- one_of(available_places);
@@ -146,15 +78,8 @@ global {
 			
 		}
 	
-		create hazard with:[proba_occur::hazard_probability];
-		create crisis_manager with:[predicated::rnd(1.0)];
-		
-		/*
-		 * Export world section
-		 */
-		save road to:"../includes/grid_network.shp" type:shp;
-		save building to:"../includes/buildings.shp" type:shp;
-		save evacuation_point to:"../includes/evac_points.shp" type:shp;
+		create hazard with:[water_body::water[0]];
+		create crisis_manager with:[evacuation_buffer::rnd(time_before_hazard)];
 		
 	}
 	
@@ -177,24 +102,29 @@ global {
  */
 species crisis_manager {
 	
-	float predicated;
+	float evacuation_buffer;
+	float hazard_happen_in <- time_before_hazard update:p_strategy.hazard_schedul();
 	
-	alert_strategy strategy;
+	alert_strategy a_strategy;
+	prediction_strategy p_strategy; 
 	
 	init {
 		
+		create pessimist_prediction returns:p_strats;
+		p_strategy <- p_strats[0];
+		
 		switch the_alert_strategy {
-			match "DEFAULT" {
-				create alert_strategy returns:strategies; 
-				strategy <- strategies[0];
+			match string(default_strategy) {
+				create default_strategy returns:strategies; 
+				a_strategy <- strategies[0];
 			}
-			match "STAGED" {
+			match string(staged_strategy) {
 				create staged_strategy returns:strategies; 
-				strategy <- strategies[0];
+				a_strategy <- strategies[0];
 			}
-			match "SPATIAL" {
+			match string(spatial_strategy) {
 				create spatial_strategy returns:strategies; 
-				strategy <- strategies[0];
+				a_strategy <- strategies[0];
 			}
 		}
 		
@@ -206,17 +136,17 @@ species crisis_manager {
 	 * Sended alert is a level from 0 to 1 according to hazard intensity
 	 * 
 	 */
-	reflex send_alert when: (hazard count (each.intensity > 0.0) > 0 or
-		flip(predicated * mean(hazard collect each.proba_occur))) and strategy.alert_conditional() {
+	reflex send_alert when: evacuation_buffer > hazard_happen_in 
+		and a_strategy.alert_conditional() {
 			
-		float hazard_level <- sum(hazard collect (each.intensity)) / length(hazard);
-		float alert_level <- hazard_level = 0.0 ? predicated : predicated*hazard_level;
+		// COMPLETLY ARBITRARY
+		float hazard_intensity <- log(1+hazard[0].evolve_speed_per_step);
 		
-		ask strategy.alert_target() { do receive_alert(alert_level); }
+		ask a_strategy.alert_target() { do receive_alert(hazard_intensity); }
 		
 		world.evacuation <- true;
 		write "ALERT SENT AT "+current_date.hour+":"+current_date.minute+":"+current_date.second
-			+"\nSTRATEGY: "+string(strategy);
+			+"\nSTRATEGY: "+string(a_strategy);
 	}
 	
 }
@@ -226,6 +156,14 @@ species crisis_manager {
 // -------------- //
 
 species alert_strategy {
+	
+	bool alert_conditional virtual:true {}
+	
+	list<inhabitant> alert_target virtual:true {}
+	
+}
+
+species default_strategy parent:alert_strategy {
 	
 	date last_alert;
 	
@@ -299,6 +237,20 @@ species spatial_strategy parent:alert_strategy {
 	
 }
 
+species prediction_strategy { float hazard_schedul virtual:true {}}
+
+species pessimist_prediction parent:prediction_strategy {
+	float hazard_schedul { return time_before_hazard * -hazard_uncertainty - cycle * step; }
+}
+
+species on_time_prediction parent:prediction_strategy {
+	float hazard_schedul { return time_before_hazard - cycle * step; }
+}
+
+species uncertainty_prediction parent:prediction_strategy {
+	float hazard_schedul {return flip(hazard_uncertainty) ? #infinity : time_before_hazard * (flip(0.5) ? 1 : -1 * hazard_uncertainty) - cycle * step;}
+}
+
 // -------------- //
 //   INHABITANT   //
 // -------------- //
@@ -315,18 +267,10 @@ species inhabitant skills:[moving] {
 	bool alerted <- false;
 	evacuation_point evac_target;
 	
-	/*
-	 * perceived alert trigger evacuation point choice if the level if equal or better than alert_threshold
-	 * 
-	 * People do choose the closest exit
-	 *  
-	 */
-	action receive_alert(float level){
-		alerted <- true;
-		if(level >= alert_threshold){
-			evac_target <- evacuation_point with_min_of (each distance_to self);
-		} else {
-			alert_threshold <- alert_threshold + alert_threshold / (1-0.95);
+	reflex casualty when:hazard[0].triggered = true {
+		if(self overlaps water[0]){
+			casualties <- casualties + 1;
+			do die;
 		}
 	}
 	
@@ -341,6 +285,21 @@ species inhabitant skills:[moving] {
 		}
 		if(location = evac_target.location){
 			ask evac_target {do evacue_inhabitant(myself);}
+		}
+	}
+	
+	/*
+	 * perceived alert trigger evacuation point choice if the level if equal or better than alert_threshold
+	 * 
+	 * People do choose the closest exit
+	 *  
+	 */
+	action receive_alert(float level){
+		alerted <- true;
+		if(level >= alert_threshold){
+			evac_target <- evacuation_point with_min_of (each distance_to self - each distance_to hazard[0]);
+		} else {
+			alert_threshold <- alert_threshold + alert_threshold / (1-0.95);
 		}
 	}
 	
@@ -364,32 +323,32 @@ species inhabitant skills:[moving] {
 
 species hazard {
 	
-	float proba_occur;
+	date catastrophe;
+	bool triggered <- false;
 	
-	float intensity;
+	float evolve_speed_per_step <- 1#m;
+	water water_body;
 	
-	bool evolve <- false;
-	
-	/*
-	 * Trigger the hazard with random intensity
-	 */
-	reflex triggered when: flip(proba_occur) {
-		if(location = nil){ location <- any_location_in(world);}
-		intensity <- rnd(1.0);
-		// NEVER OCCUR AGAIN
-		proba_occur <- 0.0;
+	init {
+		catastrophe <- flip(hazard_uncertainty) ? nil : current_date + time_before_hazard * (flip(0.5) ? 1 : -1 * hazard_uncertainty);
 	}
 	
-	/*
-	 * Intensity decrease
-	 */
-	reflex evolve when: evolve and intensity > 0.0 {
-		intensity <- intensity <= 0.01 ? 0.0 : intensity * 0.99;
+	reflex begin when:current_date - catastrophe < step * 2 {
+		triggered <- true;
 	}
 	
+	reflex evolve when:triggered {
+		water_body.shape <- water_body.shape buffer evolve_speed_per_step;
+	}
+		
 	aspect default {
-		draw sphere(hazard_max_size*intensity) at: {location.x,location.y,-hazard_max_size*intensity} color:#red;
+		draw water_body.shape color:#blue;
+		//draw sphere(hazard_max_size*intensity) at: {location.x,location.y,-hazard_max_size*intensity} color:#red;
 	}
+	
+}
+
+species water {
 	
 }
 
@@ -420,11 +379,11 @@ species road {
 	int users;
 	float capacity;
 	
-	float display_size;
+	int nb_lane <- 2;
 	
 	reflex disrupt when: road_impact and not(empty(hazard)) {
 		loop h over:hazard {
-			if(self distance_to h < h.intensity*hazard_max_size){
+			if(self distance_to h < 1#m){
 				do die;
 			}
 		}
@@ -432,12 +391,11 @@ species road {
 	
 	reflex update_weights {
 		road_weights[self] <- shape.perimeter * exp(-users/capacity);
-		display_size <- users/capacity*4#m;
 		users <- 0;
 	}
 	
 	aspect default{
-		draw shape width: display_size color:rgb(55+200*users/capacity,0,0);
+		draw shape width: users/capacity*nb_lane*2.5#m color:rgb(55+200*users/capacity,0,0);
 	}	
 }
 
@@ -446,31 +404,38 @@ species road {
  */
 species building {
 	
-	float building_height;
-	int max_capacity;
+	float height;
+	int capacity;
 	
 	list<inhabitant> occupants;
 	
 	aspect default {
 		//draw shape depth:length(occupants)/max_capacity*building_height color:#grey;
-		draw shape depth:building_height border:#black color:#white;
+		draw shape depth:height border:#black color:#white;
 	}
 	
 }
 
+species ground {
+	aspect default {
+		draw shape color:#grey;
+	}
+}
+
 experiment my_experiment type:gui {
+	parameter "Alert time before catastrophe" var:time_before_hazard init:20#mn;
+	parameter "Hazard triggering uncertainty" var:hazard_uncertainty init:0.0;
 	parameter "Number of people" var: nb_of_people min: 100 init:5000;
-	parameter "Number of exit" var:nb_exit min:1 init:4;
-	parameter "Hazard probability" var:hazard_probability init:0.01;
 	parameter "Average evacuation individual threshold" var:indiv_threshold_gauss type:pair init:0.0::0.0;
 	parameter "Alert Strategy" var:the_alert_strategy init:"Default" among:the_strategies;
 	output{
 		display my_display type:opengl { 
-			species inhabitant;
+			species ground transparency:0.2;
+			species hazard transparency:0.5;
+			species building transparency:0.5;
 			species road;
 			species evacuation_point;
-			species hazard transparency:0.7;
-			species building transparency:0.5;
+			species inhabitant;
 		}
 		
 		monitor safe_inhabitant value:safe_inhabitant;
