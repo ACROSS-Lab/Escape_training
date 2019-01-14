@@ -9,8 +9,10 @@ model EscapeTrainingEnvironment
 
 global {
 	
+	bool water_body <- false;
+	
 	// Number of road sections
-	int nb_xy_intersect <- 50;
+	int nb_xy_intersect <- 20;
 	
 	// building attributes
 	pair floor_range <- 2.4#m::3.4#m;
@@ -30,32 +32,33 @@ global {
 	init {
 		
 		float t <- machine_time;
-		write "START CREATION OF THE ENVIRONMENT";
-		int image_rows <- matrix(image).rows;
-		int image_columns <- matrix(image).columns;
-		
-		float factorDiscret_width <- image_rows / grid_rows;
-		float factorDiscret_height <- image_columns / grid_colums;
-		ask cell {		
-			color <-rgb( (image) at {grid_x * factorDiscret_height,grid_y * factorDiscret_width}) ;
-		} 
-		map<rgb, list<cell>> cells_per_color <- cell group_by each.color;
-		loop col over: cells_per_color.keys {
-			geometry geom <- union(cells_per_color[col]) + 0.001;
-			if (geom != nil) {
-				string species_name <- color_to_species[col];
-				switch species_name {
-					match string(water) {
-						create water from: geom.geometries;
-					}
-					match string(ground) {
-						create ground from: geom.geometries;
+		if(water_body){
+			write "START CREATION OF THE ENVIRONMENT";
+			int image_rows <- matrix(image).rows;
+			int image_columns <- matrix(image).columns;
+			
+			float factorDiscret_width <- image_rows / grid_rows;
+			float factorDiscret_height <- image_columns / grid_colums;
+			ask cell {		
+				color <-rgb( (image) at {grid_x * factorDiscret_height,grid_y * factorDiscret_width}) ;
+			} 
+			map<rgb, list<cell>> cells_per_color <- cell group_by each.color;
+			loop col over: cells_per_color.keys {
+				geometry geom <- union(cells_per_color[col]) + 0.001;
+				if (geom != nil) {
+					string species_name <- color_to_species[col];
+					switch species_name {
+						match string(water) {
+							create water from: geom.geometries;
+						}
+						match string(ground) {
+							create ground from: geom.geometries;
+						}
 					}
 				}
 			}
+			write "END - TIME ELAPSE: "+((machine_time-t)/1000)+"sec";
 		}
-		
-		write "END - TIME ELAPSE: "+((machine_time-t)/1000)+"sec";
 		
 		write "START CREATION OF ROADS";
 		t <- machine_time;
@@ -81,7 +84,9 @@ global {
 		
 		// Create network of road
 		lines <- clean_network(lines,0.0,true,true);
-		lines <- lines where (not(each overlaps water[0]));
+		if(water_body){
+			lines <- lines where (not(each overlaps water[0]));
+		}
 		loop l over:lines{
 			create road {
 				shape <- l;
@@ -109,8 +114,10 @@ global {
 			}
 		}
 		
-		ask building {
-			if(self overlaps water[0] or self distance_to water[0] < 4#m){ do die;}
+		if(water_body){
+			ask building {
+				if(self overlaps water[0] or self distance_to water[0] < 4#m){ do die;}
+			}
 		}
 		
 		write "END - "+length(building)+" BUILDINGS - TIME ELAPSE: "+((machine_time-t)/1000)+"sec";
@@ -125,11 +132,17 @@ global {
 		write "END - "+length(evacuation_point)+" EVACUATION POINTS - TIME ELAPSE: "+((machine_time-t)/1000)+"sec";
 		
 		write "EXPORT TO FILES";
-		save water to:"../includes/sea_environment.shp" type:shp;
-		save ground to:"../includes/ground_environment.shp" type:shp;
-		save road to:"../includes/road_environment.shp" with:[capacity::"capacity"] type:shp;
-		save building to:"../includes/building_environment.shp" with:[height::"height",capacity::"capacity"] type:shp;
-		save evacuation_point to:"../includes/evacuation_environment.shp" type:shp;
+		if(water_body){
+			save water to:"../includes/sea_environment.shp" type:shp;
+			save ground to:"../includes/ground_environment.shp" type:shp;
+			save road to:"../includes/road_environment.shp" with:[capacity::"capacity"] type:shp;
+			save building to:"../includes/building_environment.shp" with:[height::"height",capacity::"capacity"] type:shp;
+			save evacuation_point to:"../includes/evacuation_environment.shp" type:shp;
+		} else {
+			save road to:"../includes/road_grid.shp" type:shp;
+			save building to:"../includes/building_grid.shp" with:[height::"height",capacity::"capacity"] type:shp;
+			save evacuation_point to:"../includes/evac_points.shp" type:shp;
+		}
 	}
 }
 

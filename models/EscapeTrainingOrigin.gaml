@@ -338,19 +338,18 @@ species hazard {
 	}
 	
 	reflex evolve when:triggered {
-		water_body.shape <- water_body.shape buffer evolve_speed_per_step;
+		geometry expend <- water_body.shape buffer evolve_speed_per_step;
+		water_body.shape <- expend - (expend - world.shape) - building;
 	}
 		
 	aspect default {
-		draw water_body.shape color:#blue;
+		draw water_body.shape color:#blue depth:1#m;
 		//draw sphere(hazard_max_size*intensity) at: {location.x,location.y,-hazard_max_size*intensity} color:#red;
 	}
 	
 }
 
-species water {
-	
-}
+species water {}
 
 species evacuation_point {
 	
@@ -430,16 +429,17 @@ experiment my_experiment type:gui {
 	parameter "Alert Strategy" var:the_alert_strategy init:"Default" among:the_strategies;
 	output{
 		display my_display type:opengl { 
-			species ground transparency:0.2;
-			species hazard transparency:0.5;
-			species building transparency:0.5;
+			//species ground;
+			species hazard;
+			species building transparency:0.8;
 			species road;
 			species evacuation_point;
 			species inhabitant;
 		}
 		
 		monitor safe_inhabitant value:safe_inhabitant;
-		monitor number_of_evacuates value:evacuating_inhabitant;
+		monitor number_of_people_evacuating value:evacuating_inhabitant;
+		monitor number_of_casualties value:casualties;
 		monitor evacuation_time value:evacuation_time	;
 	}
 }
