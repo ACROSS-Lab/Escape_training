@@ -59,6 +59,7 @@ species inhabitant skills:[moving] {
 	reflex perceive_hazard when: not is_hazard {
 		is_hazard <- not empty (hazard at_distance perception_dist);
 	}
+	
 	reflex evacuate when:is_hazard {
 		do goto target:safety_point;
 		if(location = safety_point.location ){
