@@ -12,7 +12,7 @@ global {
 	bool water_body <- true;
 	
 	// Number of road sections
-	int nb_xy_intersect <- 20;
+	int nb_xy_intersect <- 10;
 	
 	// building attributes
 	pair floor_range <- 2.4#m::3.4#m;
@@ -24,8 +24,8 @@ global {
 	// World shape attributes
 	int grid_rows const: true <- 100;
 	int grid_colums const: true <- 100;	 
-	image_file image <- image_file("../includes/DessinLouve.png");
-	geometry shape <- square(1#km);
+	image_file image <- image_file("../includes/DessinLouve2.png");
+	geometry shape <- square(500#m);
 	
 	map<rgb,string> color_to_species <- [rgb (128, 64, 3)::string(ground),#navy::string(water)];
 	
@@ -183,7 +183,7 @@ species evacuation_point {
 
 experiment Vectorize type: gui {
 	parameter "Number of exit" var:nb_exit init:4;
-	parameter "Number of road section" var:nb_xy_intersect init:40;
+	parameter "Number of road section" var:nb_xy_intersect init:20;
 	output {
 		display map_vector type:opengl{
 			species water;
