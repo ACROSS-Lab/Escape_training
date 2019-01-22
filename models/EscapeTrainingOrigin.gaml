@@ -157,9 +157,13 @@ species crisis_manager {
 
 species alert_strategy {
 	
-	bool alert_conditional virtual:true {}
+	bool alert_conditional {
+		return true;
+	}
 	
-	list<inhabitant> alert_target virtual:true {}
+	list<inhabitant> alert_target {
+		return list(inhabitant);
+	}
 	
 }
 
@@ -174,10 +178,6 @@ species default_strategy parent:alert_strategy {
 		} else {
 			return false;
 		}
-	}
-	
-	list<inhabitant> alert_target {
-		return list(inhabitant);
 	}
 	
 }
@@ -237,7 +237,7 @@ species spatial_strategy parent:alert_strategy {
 	
 }
 
-species prediction_strategy { float hazard_schedul virtual:true {}}
+species prediction_strategy { float hazard_schedul { return #infinity;} }
 
 species pessimist_prediction parent:prediction_strategy {
 	float hazard_schedul { return time_before_hazard * -hazard_uncertainty - cycle * step; }
