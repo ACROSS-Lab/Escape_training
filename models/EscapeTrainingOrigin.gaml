@@ -16,7 +16,7 @@ global {
 	pair indiv_threshold_gauss;
 	int nb_of_people;
 	
-	bool road_impact <- false;
+	bool road_impact <- true;
 	
 	string the_alert_strategy;
 	list<string> the_strategies <- list(string(default_strategy),string(staged_strategy),string(spatial_strategy));
@@ -140,7 +140,7 @@ species crisis_manager {
 		and a_strategy.alert_conditional() {
 			
 		// COMPLETLY ARBITRARY
-		float hazard_intensity <- log(1+hazard[0].evolve_speed_per_step);
+		float hazard_intensity <- log(1+hazard[0].speed);
 		
 		ask a_strategy.alert_target() { do receive_alert(hazard_intensity); }
 		
@@ -267,18 +267,12 @@ species inhabitant skills:[moving] {
 	bool alerted <- false;
 	evacuation_point evac_target;
 	
-	reflex casualty when:hazard[0].triggered = true {
-		if(self overlaps water[0]){
-			casualties <- casualties + 1;
-			do die;
-		}
-	}
-	
 	/*
 	 * Evacue goto choosen evacuation point
 	 */
 	reflex evacuate when:alerted and evacuation_point != nil {
-		do goto target:evac_target on:road_network move_weights:road_weights;
+		do goto target:evac_target on:road_network move_weights:road_weights speed:speed;
+		write real_speed;
 		road the_current_road <- road(current_edge);
 		if(the_current_road != nil){
 			the_current_road.users <- the_current_road.users + 1;
@@ -301,6 +295,10 @@ species inhabitant skills:[moving] {
 		} else {
 			alert_threshold <- alert_threshold + alert_threshold / (1-0.95);
 		}
+	}
+	
+	action leave_domaged_road {
+		location <- any_location_in(road_network.edges closest_to self);
 	}
 	
 	aspect default{
@@ -326,7 +324,7 @@ species hazard {
 	date catastrophe;
 	bool triggered <- false;
 	
-	float evolve_speed_per_step <- 1#m;
+	float speed <- 10#m/#mn;
 	water water_body;
 	
 	init {
@@ -338,13 +336,16 @@ species hazard {
 	}
 	
 	reflex evolve when:triggered {
-		geometry expend <- water_body.shape buffer evolve_speed_per_step;
+		geometry expend <- water_body.shape buffer (speed * step);
 		water_body.shape <- expend - (expend - world.shape) - building;
+		ask inhabitant overlapping water_body {
+			casualties <- casualties + 1; 
+			do die;
+		}
 	}
 		
 	aspect default {
 		draw water_body.shape color:#blue depth:1#m;
-		//draw sphere(hazard_max_size*intensity) at: {location.x,location.y,-hazard_max_size*intensity} color:#red;
 	}
 	
 }
@@ -375,26 +376,30 @@ species evacuation_point {
 
 species road {
 
-	int users;
+	list<inhabitant> users;
 	float capacity;
+	float speed_coeff;
 	
 	int nb_lane <- 2;
 	
-	reflex disrupt when: road_impact and not(empty(hazard)) {
+	reflex disrupt when: road_impact and every(20#cycles) and not(empty(hazard)) {
 		loop h over:hazard {
 			if(self distance_to h < 1#m){
+				road_network >- self;
+				ask users { do leave_domaged_road; }
 				do die;
 			}
 		}
 	}
 	
 	reflex update_weights {
-		road_weights[self] <- shape.perimeter * exp(-users/capacity);
-		users <- 0;
+		speed_coeff <- exp(-length(users)/capacity);
+		road_weights[self] <- speed_coeff;
+		users <- [];
 	}
 	
 	aspect default{
-		draw shape width: users/capacity*nb_lane*2.5#m color:rgb(55+200*users/capacity,0,0);
+		draw shape width: speed_coeff*nb_lane*2.5#m color:rgb(55+200*length(users)/capacity,0,0);
 	}	
 }
 

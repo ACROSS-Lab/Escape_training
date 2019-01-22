@@ -9,7 +9,7 @@ model EscapeTrainingEnvironment
 
 global {
 	
-	bool water_body <- false;
+	bool water_body <- true;
 	
 	// Number of road sections
 	int nb_xy_intersect <- 20;
