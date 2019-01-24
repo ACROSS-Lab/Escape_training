@@ -29,9 +29,9 @@ global {
 	graph<geometry, geometry> road_network;
 	map<road,float> road_weights;
 	
-	int casualties <- 0;
+	int casualties;
 	
-	init{
+	init {
 				
 		create road from:road_file;
 		create building from:buildings;
@@ -175,9 +175,9 @@ species hazard {
 	
 	reflex expand when:catastrophe_date < current_date {
 		shape <- shape buffer (speed * step);
-		ask inhabitant overlapping self { 
+		ask inhabitant overlapping self {
+			casualties <- casualties + 1; 
 			do die;
-			casualties <- casualties + 1;
 		}
 		if(every(refresh_damage)){ 
 			ask road where (self covers each) {
@@ -265,13 +265,13 @@ species road {
 	float speed_coeff;
 	
 	reflex update_weights {
-		speed_coeff <- self.shape.perimeter / min(exp(-users/capacity), 0.1);
-		road_weights[self] <- speed_coeff;
+		speed_coeff <- max(exp(-users/capacity), 0.1);
+		road_weights[self] <- self.shape.perimeter / speed_coeff;
 		users <- 0;
 	}
 	
 	aspect default{
-		draw shape width: 4-(3*speed_coeff)#m color:rgb(55+200*length(users)/capacity,0,0);
+		draw shape width: 4#m-(3*speed_coeff)#m color:rgb(55+200*length(users)/capacity,0,0);
 	}	
 	
 }
