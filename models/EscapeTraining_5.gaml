@@ -261,17 +261,16 @@ species evacuation_point {
 species road {
 	
 	int users;
-	int capacity <- int(shape.perimeter);
 	float speed_coeff;
 	
 	reflex update_weights {
-		speed_coeff <- max(exp(-users/capacity), 0.1);
-		road_weights[self] <- self.shape.perimeter / speed_coeff;
+		speed_coeff <- max(exp(-users/shape.perimeter), 0.1);
+		road_weights[self] <- shape.perimeter / speed_coeff;
 		users <- 0;
 	}
 	
 	aspect default{
-		draw shape width: 4#m-(3*speed_coeff)#m color:rgb(55+200*length(users)/capacity,0,0);
+		draw shape width: 4#m-(3*speed_coeff)#m color:rgb(55+200*length(users)/shape.perimeter,0,0);
 	}	
 	
 }
