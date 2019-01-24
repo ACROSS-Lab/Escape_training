@@ -12,12 +12,14 @@ global {
 	float step <- 10#sec;
 	
 	int nb_of_people <- 5000;
+	float min_perception_distance <- 50.0;
+	float max_perception_distance <- 500.0;
 	
 	file road_file <- file("../includes/road_environment.shp");
 	file buildings <- file("../includes/building_environment.shp");
 	file evac_points <- file("../includes/evacuation_environment.shp");
 	file water_body <- file("../includes/sea_environment.shp");
-	geometry shape <- envelope(road_file);
+	geometry shape <- envelope(envelope(road_file)+envelope(water_body));
 	
 	graph<geometry, geometry> road_network;
 	map<road,float> road_weights;
@@ -29,7 +31,10 @@ global {
 		create evacuation_point from:evac_points;
 		create hazard from: water_body;
 		
-		create inhabitant number:nb_of_people with:[location::any_location_in(one_of(building))];
+		create inhabitant number:nb_of_people {
+			location <- any_location_in(one_of(building));
+			safety_point <- evacuation_point with_min_of (each distance_to self);
+		}
 		
 		road_network <- as_edge_graph(road);
 		road_weights <- road as_map (each::each.shape.perimeter);
@@ -61,8 +66,8 @@ species inhabitant skills:[moving] {
 	road the_current_road;
 	
 	bool alerted <- false;
-	evacuation_point safety_point <- evacuation_point closest_to self;
-	float perception_dist <- rnd(50#m,1#km);
+	evacuation_point safety_point;
+	float perception_dist <- rnd(min_perception_distance,max_perception_distance);
 	
 	reflex perceive_hazard when: not alerted {
 		alerted <- not empty (hazard at_distance perception_dist);
@@ -77,7 +82,8 @@ species inhabitant skills:[moving] {
 		} 
 		
 		if(location = safety_point.location ){ 
-			ask safety_point {do evacue_inhabitant(myself);}
+			ask safety_point {do evacue_inhabitant;}
+			do die;
 		}
 	}
 	
@@ -95,9 +101,16 @@ species evacuation_point {
 	
 	int count_exit <- 0;
 	
-	action evacue_inhabitant(inhabitant people) {
+	reflex disrupt when: not(empty(hazard)) and hazard[0] distance_to self < 1#m {
+		list<evacuation_point> available_exit <- evacuation_point where (each != self);
+		ask inhabitant where (each.safety_point = self) {
+			self.safety_point <- available_exit with_min_of (each distance_to self);
+		}
+		do die;
+	}
+	
+	action evacue_inhabitant {
 		count_exit <- count_exit + 1;
-		ask people {do die;}
 	}
 	
 	aspect default {
@@ -123,14 +136,13 @@ species road {
 	}
 	
 	reflex update_weights {
-		speed_coeff <- exp(-length(users)/capacity);
+		speed_coeff <- self.shape.perimeter / min(exp(-length(users)/capacity), 0.1);
 		road_weights[self] <- speed_coeff;
-		users <- [];
 	}
 	
 	aspect default{
-		draw shape width: length(users)/capacity color:rgb(55+200*length(users)/capacity,0,0);
-	}
+		draw shape width: 4-(3*speed_coeff)#m color:rgb(55+200*length(users)/capacity,0,0);
+	}	
 	
 }
 

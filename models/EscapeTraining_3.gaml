@@ -19,7 +19,7 @@ global {
 	file buildings <- file("../includes/building_environment.shp");
 	file evac_points <- file("../includes/evacuation_environment.shp");
 	file water_body <- file("../includes/sea_environment.shp");
-	geometry shape <- envelope(road_file);
+	geometry shape <- envelope(envelope(road_file)+envelope(water_body));
 	
 	graph<geometry, geometry> road_network;
 	
@@ -31,8 +31,8 @@ global {
 		create hazard from:water_body;
 		
 		create inhabitant number:nb_of_people {
-			safety_point <- evacuation_point with_min_of (each distance_to self);
 			location <- any_location_in(one_of(building));
+			safety_point <- evacuation_point with_min_of (each distance_to self);
 		}
 		
 		road_network <- as_edge_graph(road);
@@ -116,11 +116,11 @@ species building {
 experiment my_experiment {
 	output {
 		display my_display type:opengl { 
-			species inhabitant;
-			species road;
-			species evacuation_point;
 			species hazard;
-			species building;			
+			species inhabitant;
+			species building;
+			species road;
+			species evacuation_point;			
 		}
 	}
 }

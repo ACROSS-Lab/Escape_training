@@ -97,9 +97,9 @@ experiment my_experiment {
 	output {
 		display my_display type:opengl { 
 			
+			species hazard;
 			species inhabitant;
 			species evacuation_point;
-			species hazard transparency:0.7;
 			
 		}
 	}
