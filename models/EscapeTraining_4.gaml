@@ -35,7 +35,7 @@ global {
 		road_weights <- road as_map (each::each.shape.perimeter);
 	}
 	
-	reflex when:empty(inhabitant){
+	reflex stop_simu when:empty(inhabitant){
 		do pause;
 	}
 	
@@ -60,15 +60,15 @@ species inhabitant skills:[moving] {
 	
 	road the_current_road;
 	
-	bool is_hazard <- false;
+	bool alerted <- false;
 	evacuation_point safety_point <- evacuation_point closest_to self;
 	float perception_dist <- rnd(50#m,1#km);
 	
-	reflex perceive_hazard when: not is_hazard {
-		is_hazard <- not empty (hazard at_distance perception_dist);
+	reflex perceive_hazard when: not alerted {
+		alerted <- not empty (hazard at_distance perception_dist);
 	}
 	
-	reflex evacuate when:is_hazard {
+	reflex evacuate when:alerted {
 		do goto target:safety_point on: road_network move_weights:road_weights;
 		
 		the_current_road <- road(current_edge);
@@ -86,7 +86,7 @@ species inhabitant skills:[moving] {
 	}
 	
 	aspect default {
-		draw circle(1#m) color:is_hazard ? #red : #blue;
+		draw circle(1#m) color:alerted ? #red : #blue;
 	}
 	
 }
@@ -101,7 +101,7 @@ species evacuation_point {
 	}
 	
 	aspect default {
-		draw circle(1#m+9#m*count_exit/nb_of_people) color:#green;
+		draw circle(1#m+19#m*count_exit/nb_of_people) color:#green;
 	}
 	
 }

@@ -12,6 +12,8 @@ global {
 	float step <- 10#sec;
 	
 	int nb_of_people <- 5000;
+	float min_perception_distance <- 50.0;
+	float max_perception_distance <- 500.0;
 	
 	file road_file <- file("../includes/road_environment.shp");
 	file buildings <- file("../includes/building_environment.shp");
@@ -28,12 +30,15 @@ global {
 		create evacuation_point from:evac_points;
 		create hazard from:water_body;
 		
-		create inhabitant number:nb_of_people with:[location::any_location_in(one_of(building))];
+		create inhabitant number:nb_of_people {
+			safety_point <- evacuation_point with_min_of (each distance_to self);
+			location <- any_location_in(one_of(building));
+		}
 		
 		road_network <- as_edge_graph(road);
 	}
 	
-	reflex when:empty(inhabitant){
+	reflex stop_simu when:empty(inhabitant){
 		do pause;
 	}
 	
@@ -56,15 +61,15 @@ species hazard {
 
 species inhabitant skills:[moving] {
 	
-	bool is_hazard <- false;
-	evacuation_point safety_point <- evacuation_point closest_to self;
-	float perception_dist <- rnd(50#m,1#km);
+	bool alerted <- false;
+	evacuation_point safety_point <- evacuation_point with_min_of (each distance_to self);
+	float perception_dist <- rnd(min_perception_distance,max_perception_distance);
 	
-	reflex perceive_hazard when: not is_hazard {
-		is_hazard <- not empty (hazard at_distance perception_dist);
+	reflex perceive_hazard when: not alerted {
+		alerted <- not empty (hazard at_distance perception_dist);
 	}
 	
-	reflex evacuate when:is_hazard {
+	reflex evacuate when:alerted {
 		do goto target:safety_point on: road_network;
 		
 		if(location = safety_point.location ){ 
@@ -73,7 +78,7 @@ species inhabitant skills:[moving] {
 	}
 	
 	aspect default {
-		draw circle(1#m) color:is_hazard ? #red : #blue;
+		draw circle(1#m) color:alerted ? #red : #blue;
 	}
 	
 }
@@ -88,7 +93,7 @@ species evacuation_point {
 	}
 	
 	aspect default {
-		draw circle(1#m+9#m*count_exit/nb_of_people) color:#green;
+		draw circle(1#m+19#m*count_exit/nb_of_people) color:#green;
 	}
 	
 }

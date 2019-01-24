@@ -265,7 +265,8 @@ species inhabitant skills:[moving] {
 	reflex evacuate when:alerted and evacuation_point != nil {
 		do goto target:evac_target on:road_network move_weights:road_weights;
 		if(location distance_to evac_target.location < 2#m){
-			ask evac_target {do evacue_inhabitant(myself);}
+			ask evac_target {do evacue_inhabitant;}
+			do die; 
 		}
 	}
 	
@@ -342,9 +343,8 @@ species evacuation_point {
 	/*
 	 * Count and kill people that have been evacuated
 	 */
-	action evacue_inhabitant(inhabitant people) {
+	action evacue_inhabitant {
 		count_exit <- count_exit + 1;
-		ask people {do die;}
 	}
 	
 	aspect default {
@@ -419,9 +419,6 @@ experiment my_experiment type:gui {
 			species road;
 			species evacuation_point;
 			species inhabitant;
-			graphics buffer_strategy {
-				draw spatial_strategy[0].d_buffer;
-			}
 		}
 		
 		monitor safe_inhabitant value:safe_inhabitant;
