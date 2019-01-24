@@ -20,17 +20,19 @@ global {
 	geometry shape <- envelope(road_file);
 	
 	graph<geometry, geometry> road_network;
+	map<road,float> road_weights;
 	
 	init{
 				
 		create road from:road_file;
 		create building from:buildings;
 		create evacuation_point from:evac_points;
-		create hazard from:water_body;
+		create hazard from: water_body;
 		
 		create inhabitant number:nb_of_people with:[location::any_location_in(one_of(building))];
 		
 		road_network <- as_edge_graph(road);
+		road_weights <- road as_map (each::each.shape.perimeter);
 	}
 	
 	reflex when:empty(inhabitant){
@@ -41,7 +43,7 @@ global {
 
 species hazard {
 	
-	float speed <- 0.2#km/#h;
+	float speed <- 10#m/#mn;
 	
 	reflex expand {
 		shape <- shape buffer (speed * step);
@@ -56,6 +58,8 @@ species hazard {
 
 species inhabitant skills:[moving] {
 	
+	road the_current_road;
+	
 	bool is_hazard <- false;
 	evacuation_point safety_point <- evacuation_point closest_to self;
 	float perception_dist <- rnd(50#m,1#km);
@@ -65,11 +69,20 @@ species inhabitant skills:[moving] {
 	}
 	
 	reflex evacuate when:is_hazard {
-		do goto target:safety_point on: road_network;
+		do goto target:safety_point on: road_network move_weights:road_weights;
+		
+		the_current_road <- road(current_edge);
+		if(the_current_road != nil){ 
+			the_current_road.users <+ self;
+		} 
 		
 		if(location = safety_point.location ){ 
 			ask safety_point {do evacue_inhabitant(myself);}
 		}
+	}
+	
+	action leave_damage_road {
+		self.location <- any_location_in(road_network.edges closest_to self);
 	}
 	
 	aspect default {
@@ -94,9 +107,29 @@ species evacuation_point {
 }
 
 species road {
-		
+	
+	list<inhabitant> users <- [];
+	int capacity <- int(shape.perimeter);
+	float speed_coeff;
+	
+	reflex disrupt when: not empty(hazard) and every(30#cycles) {
+		loop h over:hazard {
+			if(self distance_to h < 1#m){
+				road_network >- self;
+				do die;
+				ask users { do leave_damage_road; }
+			}
+		}
+	}
+	
+	reflex update_weights {
+		speed_coeff <- exp(-length(users)/capacity);
+		road_weights[self] <- speed_coeff;
+		users <- [];
+	}
+	
 	aspect default{
-		draw shape color:#black;
+		draw shape width: length(users)/capacity color:rgb(55+200*length(users)/capacity,0,0);
 	}
 	
 }
@@ -115,7 +148,8 @@ experiment my_experiment {
 			species road;
 			species evacuation_point;
 			species hazard;
-			species building;			
+			species building;
+			
 		}
 	}
 }
