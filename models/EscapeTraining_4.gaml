@@ -54,6 +54,12 @@ species hazard {
 	reflex expand {
 		shape <- shape buffer (speed * step);
 		ask inhabitant overlapping self { do die; }
+		if(every(refresh_damage)){ 
+			ask road where (self covers each) {
+				road_network >- self; 
+				do die;
+			}
+		}
 	}
 	
 	aspect default {
@@ -63,8 +69,6 @@ species hazard {
 }
 
 species inhabitant skills:[moving] {
-	
-	road the_current_road;
 	
 	bool alerted <- false;
 	evacuation_point safety_point;
@@ -76,20 +80,15 @@ species inhabitant skills:[moving] {
 	
 	reflex evacuate when:alerted {
 		do goto target:safety_point on: road_network move_weights:road_weights;
-		
-		the_current_road <- road(current_edge);
-		if(the_current_road != nil){ 
-			the_current_road.users <+ self;
+		if(current_edge != nil){
+			road the_current_road <- road(current_edge);  
+			the_current_road.users <- the_current_road.users + 1;
 		} 
 		
-		if(location = safety_point.location ){ 
+		if(location distance_to safety_point.location < 2#m){ 
 			ask safety_point {do evacue_inhabitant;}
 			do die;
 		}
-	}
-	
-	action leave_damage_road(road closest_road) {
-		self.location <- any_location_in(closest_road);
 	}
 	
 	aspect default {
@@ -122,29 +121,14 @@ species evacuation_point {
 
 species road {
 	
-	list<inhabitant> users <- [];
+	int users;
 	int capacity <- int(shape.perimeter);
 	float speed_coeff;
 	
-	reflex disrupt when: not empty(hazard) and every(refresh_damage) {
-		loop h over:hazard {
-			if(h covers self){
-				road_network >- self;
-				/* 
-				list<road> close_roads <- road where (each distance_to h > 2#m and each distance_to self < h.speed * refresh_damage);
-				ask users { 
-					do leave_damage_road(close_roads with_min_of (each distance_to self));
-				}
-				* 
-				*/
-				do die;
-			}
-		}
-	}
-	
 	reflex update_weights {
-		speed_coeff <- self.shape.perimeter / min(exp(-length(users)/capacity), 0.1);
+		speed_coeff <- self.shape.perimeter / min(exp(-users/capacity), 0.1);
 		road_weights[self] <- speed_coeff;
+		users <- 0;
 	}
 	
 	aspect default{
