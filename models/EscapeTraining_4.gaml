@@ -10,6 +10,7 @@ model EscapeTrainingBasic
 global {
 	
 	float step <- 10#sec;
+	int refresh_damage <- 20#cycles;
 	
 	int nb_of_people <- 5000;
 	float min_perception_distance <- 50.0;
@@ -87,8 +88,8 @@ species inhabitant skills:[moving] {
 		}
 	}
 	
-	action leave_damage_road {
-		self.location <- any_location_in(road_network.edges closest_to self);
+	action leave_damage_road(road closest_road) {
+		self.location <- any_location_in(closest_road);
 	}
 	
 	aspect default {
@@ -125,12 +126,18 @@ species road {
 	int capacity <- int(shape.perimeter);
 	float speed_coeff;
 	
-	reflex disrupt when: not empty(hazard) and every(30#cycles) {
+	reflex disrupt when: not empty(hazard) and every(refresh_damage) {
 		loop h over:hazard {
-			if(self distance_to h < 1#m){
+			if(h covers self){
 				road_network >- self;
+				/* 
+				list<road> close_roads <- road where (each distance_to h > 2#m and each distance_to self < h.speed * refresh_damage);
+				ask users { 
+					do leave_damage_road(close_roads with_min_of (each distance_to self));
+				}
+				* 
+				*/
 				do die;
-				ask users { do leave_damage_road; }
 			}
 		}
 	}
