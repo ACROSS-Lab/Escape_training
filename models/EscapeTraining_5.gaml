@@ -73,8 +73,7 @@ species crisis_manager {
 				create spatial_strategy returns:strategies; 
 				a_strategy <- strategies[0];
 			}
-		}
-		
+		}	
 	}
 	
 	reflex send_alert when: a_strategy.alert_conditional() {
@@ -179,12 +178,19 @@ species hazard {
 			casualties <- casualties + 1; 
 			do die;
 		}
-		if(every(refresh_damage)){ 
-			ask road where (self covers each) {
-				road_network >- self; 
-				do die;
-			}
+		//if(every(refresh_damage)){ 
+		ask road where (self covers each) {
+			road_network >- self; 
+			do die;
 		}
+		//}
+		ask evacuation_point where (each distance_to self < 2#m) {
+			list<evacuation_point> available_exit <- evacuation_point where (each != self);
+			ask inhabitant where (each.safety_point = self) {
+				self.safety_point <- available_exit with_min_of (each distance_to self);
+			}
+			do die;
+		} 
 	}
 	
 	aspect default {
@@ -240,6 +246,7 @@ species evacuation_point {
 	
 	int count_exit <- 0;
 	
+	/* 
 	reflex disrupt when: not(empty(hazard)) and hazard[0] distance_to self < 1#m {
 		list<evacuation_point> available_exit <- evacuation_point where (each != self);
 		ask inhabitant where (each.safety_point = self) {
@@ -247,6 +254,8 @@ species evacuation_point {
 		}
 		do die;
 	}
+	* 
+	*/
 	
 	action evacue_inhabitant {
 		count_exit <- count_exit + 1;
@@ -264,7 +273,7 @@ species road {
 	float speed_coeff;
 	
 	reflex update_weights {
-		speed_coeff <- max(exp(-users/shape.perimeter), 0.1);
+		speed_coeff <- max(exp(-users/shape.perimeter), 0.01);
 		road_weights[self] <- shape.perimeter / speed_coeff;
 		users <- 0;
 	}
@@ -291,8 +300,7 @@ experiment my_experiment {
 			species road;
 			species evacuation_point;
 			species hazard;
-			species building;
-			
+			species building;	
 		}
 		monitor number_of_casualties value:casualties;
 	}
