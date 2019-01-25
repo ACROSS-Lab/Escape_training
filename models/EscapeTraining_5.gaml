@@ -10,7 +10,6 @@ model EscapeTrainingBasic
 global {
 	
 	float step <- 10#sec;
-	int refresh_damage <- 20#cycles;
 	
 	int nb_of_people <- 5000;
 	float min_perception_distance <- 50.0;
@@ -111,10 +110,10 @@ species default_strategy parent:alert_strategy {
 
 species staged_strategy parent:alert_strategy {
 	
-	int nb_stage <- 4;
+	int nb_stage <- 8;
 	list<list<inhabitant>> staged_target;
 	
-	float alert_range <- 3#mn;
+	float alert_range <- (time_before_hazard / 2) / nb_stage;
 	
 	init {
 		list<inhabitant> buffer <- list(inhabitant);
@@ -143,17 +142,21 @@ species spatial_strategy parent:alert_strategy {
 	
 	geometry d_buffer;
 	float distance_buffer <- 50#m;
-	int buffered_inhabitants;
-	float buffer_tolerance <- 0.1;
+	int buffered_inhabitants <- [];
 	
+	//float buffer_tolerance <- 0.1;
+	
+	float alert_range <- (time_before_hazard / 2) / (world.shape.height / distance_buffer);
 	int iter <- 1;
 	
 	bool alert_conditional {
-		return iter = 1 or length(inhabitant overlapping d_buffer) < (buffered_inhabitants * buffer_tolerance);
+		return every(alert_range) or empty(buffered_inhabitants);
+		//return iter = 1 or length(inhabitant overlapping d_buffer) < (buffered_inhabitants * buffer_tolerance);
 	}
 	
 	list<inhabitant> alert_target {
-		d_buffer <- hazard[0] buffer (distance_buffer * iter);
+		d_buffer <- line({0,0},{world.shape.width,0}) buffer (distance_buffer * iter);
+		//d_buffer <- hazard[0] buffer (distance_buffer * iter);
 		list<inhabitant> trgt <- inhabitant overlapping d_buffer;
 		buffered_inhabitants <- length(trgt); 
 		iter <- iter + 1;
@@ -270,11 +273,11 @@ species evacuation_point {
 species road {
 	
 	int users;
-	float speed_coeff;
+	float speed_coeff <- 1.0;
 	
 	reflex update_weights {
-		speed_coeff <- max(exp(-users/shape.perimeter), 0.01);
-		road_weights[self] <- shape.perimeter / speed_coeff;
+		speed_coeff <- max(exp(-users/(shape.perimeter*4)), 0.1);
+		road_weights[self] <- (shape.perimeter*4) / speed_coeff;
 		users <- 0;
 	}
 	
@@ -293,7 +296,7 @@ species building {
 
 experiment my_experiment {
 	parameter "Alert Strategy" var:the_alert_strategy init:string(default_strategy) among:the_strategies;
-	parameter "Time before hazard" var:time_before_hazard init:15#mn min:1#mn max:30#mn;
+	parameter "Time before hazard" var:time_before_hazard init:1#h min:5#mn max:2#h;
 	output {
 		display my_display type:opengl { 
 			species inhabitant;
