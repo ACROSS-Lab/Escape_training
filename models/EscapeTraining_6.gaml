@@ -10,7 +10,7 @@ model EscapeTrainingBasic
 import "EscapeTraining_5.gaml"
 
 experiment exp type: batch until: empty(inhabitant) repeat: 8 {
-	parameter "Alert Strategy" var:the_alert_strategy init:string(default_strategy) among:the_strategies;	
+	parameter "Alert Strategy" var:the_alert_strategy init:string(alert_strategy) among:the_strategies;	
 	parameter "Nb people" var: nb_of_people among: [1000,3000,5000,7000,9000,20000];	
 	parameter "Time before hazard" var:time_before_hazard init: 1#mn among: [0#mn, 1#mn, 15#mn, 30#mn];
 

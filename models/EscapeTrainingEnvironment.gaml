@@ -29,6 +29,8 @@ global {
 	
 	map<rgb,string> color_to_species <- [rgb (128, 64, 3)::string(ground),#navy::string(water)];
 	
+	list<road> the_list_of_road;
+	
 	init {
 		
 		float t <- machine_time;
@@ -85,12 +87,14 @@ global {
 		// Create network of road
 		lines <- clean_network(lines,0.0,true,true);
 		if(water_body){
-			lines <- lines where (not(each overlaps water[0]));
+			ask water {
+				lines >>- lines where (each overlaps self);
+			}
 		}
-		loop l over:lines{
+		
+		loop l over:lines {
 			create road {
 				shape <- l;
-				capacity <- l.perimeter;
 			}
 		}	
 		
@@ -115,8 +119,10 @@ global {
 		}
 		
 		if(water_body){
-			ask building {
-				if(self overlaps water[0] or self distance_to water[0] < 4#m){ do die;}
+			ask water {
+				ask building overlapping self {
+					do die;
+				}
 			}
 		}
 		
@@ -135,8 +141,8 @@ global {
 		if(water_body){
 			save water to:"../includes/sea_environment.shp" type:shp;
 			save ground to:"../includes/ground_environment.shp" type:shp;
-			save road to:"../includes/road_environment.shp" with:[capacity::"capacity"] type:shp;
-			save building to:"../includes/building_environment.shp" with:[height::"height",capacity::"capacity"] type:shp;
+			save road to:"../includes/road_environment.shp" type:shp;
+			save building to:"../includes/building_environment.shp" type:shp;
 			save evacuation_point to:"../includes/evacuation_environment.shp" type:shp;
 		} else {
 			save road to:"../includes/road_grid.shp" type:shp;
@@ -144,6 +150,13 @@ global {
 			save evacuation_point to:"../includes/evac_points.shp" type:shp;
 		}
 	}
+	
+	user_command create_road_from_list {
+		create road with: [shape::union(the_list_of_road)];
+		ask the_list_of_road { do die; }
+		save road to:"../includes/road_environment.shp" type:shp;
+	}
+	
 }
 
 grid cell  width: grid_rows height: grid_colums;
@@ -164,6 +177,10 @@ species road {
 	float capacity;
 	aspect default {
 		draw shape color:#black;
+	}
+	
+	user_command add_to_list {
+		the_list_of_road <+ self;
 	}
 }
 
