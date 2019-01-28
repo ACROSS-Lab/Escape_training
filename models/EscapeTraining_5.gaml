@@ -12,12 +12,12 @@ global {
 	float step <- 10#sec;
 	
 	int nb_of_people <- 5000;
-	float min_perception_distance <- 50.0;
-	float max_perception_distance <- 500.0;
+	float min_perception_distance <- 10.0;
+	float max_perception_distance <- 30.0;
 	
-	list<string> the_strategies <- list(string(alert_strategy),string(staged_strategy),string(spatial_strategy));
 	string the_alert_strategy;
-	float time_before_hazard;
+	float time_before_hazard <- 1#h;
+	int nb_stages <- 8;
 	
 	file road_file <- file("../includes/road_environment.shp");
 	file buildings <- file("../includes/building_environment.shp");
@@ -29,9 +29,15 @@ global {
 	map<road,float> road_weights;
 	
 	int casualties;
+	int crowd_casualties;
+	
+	// TO BE DELETED
 	float average_speed <- 0.0 update: mean(inhabitant collect each.real_speed)*3.6;
 	float max_density <- 0.0 update: max(road collect (each.users / each.shape.perimeter));
-	float av_desntity <- 0.0 update: mean(road collect (each.users / each.shape.perimeter));
+	float av_desntity <- 0.0 update: mean(road where (each.users > 0) collect (each.users / each.shape.perimeter));
+	float max_overload <- 0.0 update: max(road collect (each.users / each.capacity));
+	float overload <- 0.0 update: mean(road where (each.users > 0) collect (each.users / each.capacity));
+	bool agent_speed <- true;
 	
 	init {
 				
@@ -49,6 +55,7 @@ global {
 		
 		road_network <- as_edge_graph(road);
 		road_weights <- road as_map (each::each.shape.perimeter);
+	
 	}
 	
 	reflex stop_simu when:empty(inhabitant){
@@ -59,109 +66,62 @@ global {
 
 species crisis_manager {
 	
-	alert_strategy a_strategy;
-	
-	init {
-		write "Alert strategy to be used: "+(the_alert_strategy=string(alert_strategy)?"default_strategy":the_alert_strategy);
-		switch the_alert_strategy {
-			match string(alert_strategy) {
-				create alert_strategy returns:strategies; 
-				a_strategy <- strategies[0];
-			}
-			match string(staged_strategy) {
-				create staged_strategy returns:strategies; 
-				a_strategy <- strategies[0];
-			}
-			match string(spatial_strategy) {
-				create spatial_strategy returns:strategies; 
-				a_strategy <- strategies[0];
-			}
-		}	
-	}
-	
-	reflex send_alert when: a_strategy.alert_conditional() {
-		ask a_strategy.alert_target() { self.alerted <- true; }
-	}
-	
-}
-
-species alert_strategy {
-	
 	bool alert <- true;
+	float alert_range;
 	
-	bool alert_conditional {
-		if(alert){
-			alert <- false;
-			return true;
-		} else {
-			return false;
-		}
-	}
-	
-	list<inhabitant> alert_target {
-		return list(inhabitant);
-	}
-	
-}
-
-species staged_strategy parent:alert_strategy {
-	
-	int nb_stage <- 8;
-	list<list<inhabitant>> staged_target;
-	
-	float alert_range <- (time_before_hazard / 2) / nb_stage;
+	int nb_per_stage;
+	geometry buffer;
+	float distance_buffer;
 	
 	init {
-		list<inhabitant> buffer <- list(inhabitant);
-		int nb_per_stage <- int(length(buffer) / nb_stage);
-		loop times:nb_stage-1 {
-			list<inhabitant> this_stage <- nb_per_stage among buffer;
-			buffer >>- this_stage; 
-			staged_target <+ this_stage;
-		}
-		staged_target <+ buffer;
+		// For stage strategy
+		int modulo_stage <- length(inhabitant) mod nb_stages = 0 ? 0 : int(length(inhabitant) mod nb_stages / nb_stages) + 1; 
+		nb_per_stage <- int(length(inhabitant) / nb_stages) + modulo_stage;
+		
+		// For spatial strategy
+		buffer <- line({0,world.shape.height},{world.shape.width,world.shape.height});
+		distance_buffer <- world.shape.height / nb_stages;
+		
+		alert_range <- (time_before_hazard / 2) / nb_stages;
+	}
+	
+	reflex send_alert when: alert_conditional() {
+		ask alert_target() { self.alerted <- true; }
 	}
 	
 	bool alert_conditional {
-		return not(empty(staged_target)) and every(alert_range);
-	}
-	
-	list<inhabitant> alert_target {
-		container<inhabitant> targets <- staged_target[0];
-		staged_target >- targets;
-		return targets;
-	}
-	
-}
-
-species spatial_strategy parent:alert_strategy {
-	
-	geometry d_buffer;
-	float distance_buffer <- 50#m;
-	int buffered_inhabitants <- [];
-	
-	float alert_range <- (time_before_hazard / 2) / (world.shape.height / distance_buffer);
-	
-	bool reverse <- false;
-	
-	init {
-		if(reverse){
-			d_buffer <- line({0,world.shape.height},{world.shape.width,world.shape.height});
-		} else {
-			d_buffer <- line({0,0},{world.shape.width,0});
+		switch the_alert_strategy {
+			match "STAGE" {
+				return (inhabitant first_with (each.alerted = false)) != nil and (cycle = 0 or every(alert_range));
+			}
+			match "SPATIAL" {
+				geometry next_stage <- buffer buffer distance_buffer;
+				return every(alert_range) or empty(inhabitant where not(each.alerted) overlapping next_stage);
+			}
+			default {
+				if(alert){
+					alert <- false;
+					return true;
+				} else {
+					return false;
+				}
+			}
 		}
 	}
 	
-	bool alert_conditional {
-		geometry next_stage <- d_buffer buffer distance_buffer;
-		return every(alert_range) or empty(inhabitant where not(each.alerted) overlapping next_stage);
-	}
-	
 	list<inhabitant> alert_target {
-		d_buffer <- d_buffer buffer distance_buffer;
-		list<inhabitant> trgt <- inhabitant overlapping d_buffer;
-		buffered_inhabitants <- length(trgt);
-		return trgt;
+		switch the_alert_strategy {
+			match "STAGE" {
+				return nb_per_stage among (inhabitant where (each.alerted = false));
+			}
+			match "SPATIAL" {
+				buffer <- buffer buffer distance_buffer;
+				return inhabitant overlapping buffer;
+			}
+			default {
+				return list(inhabitant);
+			}
+		}
 	}
 	
 }
@@ -207,11 +167,25 @@ species inhabitant skills:[moving] {
 	
 	bool alerted <- false;
 	evacuation_point safety_point;
-	float speed <- 6#km/#h;
+	float speed <- 10#km/#h max:10#km/#h;
+	
+	/* 
+	geometry perception_area; 
+	list<inhabitant> user_in_front;
+	
+	reflex eval_speed when:agent_speed and alerted {
+		perception_area <- cone(heading-45.0,heading+45.0) intersection circle(speed * step);
+		user_in_front <- (inhabitant overlapping perception_area) - self;
+		if(empty(user_in_front)){ 
+			speed <- speed + 1;
+		} else {speed <- speed / (1+log(length(user_in_front)));}
+	}
+	* 
+	*/
 	
 	reflex evacuate when:alerted {
-		if(real_speed > 5#km/#h) {write real_speed * 3.6;}
-		do goto target:safety_point on: road_network move_weights:road_weights;
+		if(agent_speed){do goto target:safety_point on: road_network;}
+		else{do goto target:safety_point on: road_network move_weights:road_weights;}
 		if(current_edge != nil){
 			road the_current_road <- road(current_edge);  
 			the_current_road.users <- the_current_road.users + 1;
@@ -246,7 +220,7 @@ species evacuation_point {
 species road {
 	
 	int users;
-	int capacity <- int(shape.perimeter*6);
+	int capacity <- int(shape.perimeter*8);
 	float speed_coeff <- 1.0;
 	
 	reflex update_weights {
@@ -267,10 +241,18 @@ species building {
 	}
 }
 
+species death {
+	aspect default {
+		draw rotated_by(rectangle(1,2)+rotated_by(rectangle(1,2), 90.0),45) color:#red border:#black;
+	}
+}
 
 experiment my_experiment {
-	parameter "Alert Strategy" var:the_alert_strategy init:string(alert_strategy) among:the_strategies;
+	
+	parameter "Alert Strategy" var:the_alert_strategy init:"DEFAULT" among:["STAGE","SPATIAL","DEFAULT"];
 	parameter "Time before hazard" var:time_before_hazard init:1#h min:5#mn max:2#h;
+	parameter "Agent based speed regulation" var:agent_speed init:false;
+	
 	output {
 		display my_display type:opengl { 
 			species inhabitant;
@@ -278,12 +260,24 @@ experiment my_experiment {
 			species evacuation_point;
 			species hazard;
 			species building;
+			species death;
+			
 		}
+		 
+		display chart_display {
+			chart "speed_chart" type:series{
+				data "average speed" value:average_speed;
+			}
+		}
+		
 		monitor number_of_casualties value:casualties;
 		
 		monitor average_speed value:average_speed;
 		monitor max_density value:max_density;
 		monitor average_density value:av_desntity;
+		monitor overload value:overload;
+		monitor max_overload value:max_overload;
+		monitor crowd_casualties value:crowd_casualties;
 	}
 	
 }
